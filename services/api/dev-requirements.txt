@@ -33,7 +33,7 @@ mypy-extensions==1.0.0
 ollama==0.4.7
 orjson==3.10.15
 packaging==24.2
-propcache==0.3.0
+propcache==0.3.1
 pycodestyle==2.12.1
 pydantic==2.10.6
 pydantic_core==2.27.2
