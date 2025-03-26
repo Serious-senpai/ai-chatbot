@@ -16,7 +16,7 @@ httpx==0.28.1
 idna==3.10
 jsonpatch==1.33
 jsonpointer==3.0.0
-langchain-core==0.3.47
+langchain-core==0.3.48
 langchain-ollama==0.3.0
 langgraph==0.3.18
 langgraph-checkpoint==2.0.21
