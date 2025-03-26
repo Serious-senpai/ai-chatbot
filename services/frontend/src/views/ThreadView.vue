@@ -52,9 +52,12 @@ function send(text: string): void {
     sse.addEventListener(
       "chunk",
       (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
-        let content = state.streamMessage.value?.data.content ?? "";
-        content += JSON.parse(e.data).content;
-        state.streamMessage.value = new Message(0n, new LangChainMessage(content, "ai"), state.thread);
+        const thread = state.thread;
+        if (thread) {
+          let content = state.streamMessage.value?.data.content ?? "";
+          content += JSON.parse(e.data).content;
+          state.streamMessage.value = new Message(0n, new LangChainMessage(content, "ai"), thread);
+        }
       }
     );
   }

@@ -33,7 +33,7 @@ class TavilyResponse(TypedDict):
 
 @tool
 async def search(query: str) -> Result[TavilyResponse]:
-    """Search for information from the Internet"""
+    """Search the Internet for real-time information"""
     http = HTTPSessionSingleton()
     await http.prepare()
 
