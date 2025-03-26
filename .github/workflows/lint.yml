@@ -25,7 +25,7 @@ jobs:
 
       - name: Run autopep8
         working-directory: services/api
-        run: /venv/bin/autopep8 --exit-code --diff -aaar .
+        run: autopep8 --exit-code --diff -aaar .
 
   mypy:
     name: Run mypy
@@ -46,7 +46,7 @@ jobs:
 
       - name: Run mypy
         working-directory: services/api
-        run: /venv/bin/mypy .
+        run: mypy .
 
   flake8:
     name: Run flake8
@@ -67,7 +67,7 @@ jobs:
 
       - name: Run flake8
         working-directory: services/api
-        run: /venv/bin/flake8 .
+        run: flake8 .
 
   eslint:
     name: Run eslint
