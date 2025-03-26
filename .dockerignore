@@ -1,0 +1,6 @@
+**/.*
+**/__pycache__
+**/Dockerfile
+**/compose.yml
+
+README.md
