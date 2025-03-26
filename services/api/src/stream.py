@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict, deque
-from typing import AsyncIterable, ClassVar, DefaultDict, Deque, List, Optional, TYPE_CHECKING
+from typing import ClassVar, DefaultDict, Deque, List, Optional, TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, BaseMessageChunk
 from langchain_core.messages.utils import _chunk_to_msg
