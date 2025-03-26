@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import namespace, parse_args
+from src import HTTPSessionSingleton, namespace, parse_args
 from src.endpoints import chat
 
 try:
@@ -20,10 +22,18 @@ else:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
+@asynccontextmanager
+async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    session = HTTPSessionSingleton()
+    yield
+    await session.close()
+
+
 app = FastAPI(
     title="AI Chatbot API",
     summary="HTTP API for AI Chatbot",
     root_path="/api",
+    lifespan=__lifespan,
 )
 app.include_router(chat.router)
 
