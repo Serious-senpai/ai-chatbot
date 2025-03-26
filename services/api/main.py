@@ -6,15 +6,20 @@ import sys
 from pathlib import Path
 
 import uvicorn
-import uvloop
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import namespace, parse_args
 from src.endpoints import chat
 
+try:
+    import uvloop
+except ImportError:
+    print("Unable to import uvloop, asynchronous operations will be slower")
+else:
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
 app = FastAPI(
     title="AI Chatbot API",
     summary="HTTP API for AI Chatbot",
