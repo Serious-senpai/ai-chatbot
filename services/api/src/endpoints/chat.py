@@ -6,7 +6,7 @@ from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, Ty
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessageChunk, HumanMessage
 from sse_starlette.sse import EventSourceResponse
 
 from ..models import Message, Thread
@@ -82,13 +82,33 @@ async def __yield_messages(content: str, thread: Thread) -> AsyncIterable[__Mess
 
     stream = ChunkStreamSingleton()
     queue = stream.subscribe(thread.id)
-    while True:
-        chunk = await queue.get()
-        yield __MessageStreamPayload(event="chunk", data=chunk.model_dump_json())
+    try:
+        # Stop streaming immediately when a complete answer is available
+        event = asyncio.Event()
+        stream.listen(thread.id, lambda _: event.set())
 
-        if chunk.response_metadata.get("done", False):
-            stream.unsubscribe(thread.id, queue)
-            break
+        to_cancel: List[asyncio.Task[Any]] = []
+        while not event.is_set():
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(event.wait()),
+                    asyncio.create_task(queue.get()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            to_cancel.extend(pending)
+
+            for item in done:
+                if isinstance(item, BaseMessageChunk):
+                    chunk = await queue.get()
+                    yield __MessageStreamPayload(event="chunk", data=chunk.model_dump_json())
+
+        for task in to_cancel:
+            if not task.done():
+                task.cancel()
+
+    finally:
+        stream.unsubscribe(thread.id, queue)
 
     data = await task
     ai_message = await Message.create(data["messages"][-1], thread)

@@ -3,21 +3,24 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, List, TypedDict
 
-from langchain_ollama import ChatOllama
 from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 
-from .llm import LLM
+from .llm import Groq
 from .results import Result
-from .tools import search, TOOLS
+from .tools import f, search, TOOLS
+from ..cli import namespace, parse_args
 from ..stream import ChunkStreamSingleton
 
 
 __all__ = ("graph",)
-LLM_SEARCH = LLM.bind_tools([search])
+
+
+parse_args()
+LLM_SEARCH = Groq(model=namespace.model, tools=[f])
 
 
 class State(TypedDict):
@@ -27,7 +30,7 @@ class State(TypedDict):
 async def chatbot(state: State, config: RunnableConfig) -> State:
     thread_id = config["metadata"]["thread_id"]
     stream = ChunkStreamSingleton()
-    async for chunk in ChatOllama.astream(LLM_SEARCH, state["messages"]):  # type: ignore
+    async for chunk in LLM_SEARCH.astream(state["messages"]):
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
