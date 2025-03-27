@@ -1,6 +1,7 @@
-**/.*
 **/__pycache__
 **/Dockerfile
 **/compose.yml
+**/.mypy_cache
+**.md
 
-README.md
+services/frontend/node_modules
