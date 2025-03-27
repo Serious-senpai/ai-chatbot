@@ -11,7 +11,7 @@ from langgraph.graph.message import add_messages
 
 from .llm import Groq
 from .results import Result
-from .tools import f, search, TOOLS
+from .tools import f, TOOLS
 from ..cli import namespace, parse_args
 from ..stream import ChunkStreamSingleton
 
