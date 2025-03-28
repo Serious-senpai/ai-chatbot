@@ -25,8 +25,10 @@ $ pip install -r dev-requirements.txt
 ```bash
 $ pwd
 /workspaces/ai-chatbot/services/api
-$ python main.py --model qwen-2.5-32b --cors
+$ python main.py --cors
 ```
+
+To view all options available, run `python main.py -h`.
 
 3. Set the environment variable `VITE_APP_BASE_API_URL` to point to the backend server.
 ```bash

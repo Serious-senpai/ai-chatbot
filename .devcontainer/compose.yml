@@ -2,6 +2,11 @@
 name: ai-chatbot
 
 services:
+  ollama:
+    container_name: ollama
+    hostname: ollama
+    image: ollama/ollama:0.6.3
+
   devcontainer:
     build:
       context: ..

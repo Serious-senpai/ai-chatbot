@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import binascii
+from base64 import b64decode
 from collections import deque
-from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, TypedDict
+from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException
+from langchain_ollama import OllamaEmbeddings
 from pydantic import BaseModel, Field
+from langchain_community.document_loaders.parsers import PyPDFParser
+from langchain_community.vectorstores import Chroma
 from langchain_core.messages import BaseMessageChunk, HumanMessage
+from langchain_core.vectorstores import VectorStoreRetriever
 from sse_starlette.sse import EventSourceResponse
+from langchain_core.documents.base import Blob
 
+from ..cli import namespace, parse_args
 from ..models import Message, Thread
-from ..rag import graph
+from ..rag import GraphState, graph
 from ..stream import ChunkStreamSingleton
 
 
@@ -20,6 +28,7 @@ router = APIRouter(
 )
 
 
+parse_args()
 THREADS: Dict[int, Thread] = {}
 MESSAGES: Dict[Thread, Deque[Message]] = {}
 
@@ -64,19 +73,40 @@ class __MessageStreamPayload(TypedDict):
 
 class __CreateMessageBody(BaseModel):
     content: Annotated[str, Field(description="The content of the message")]
+    file: Annotated[Optional[str], Field(description="The base64-encoded file to send")]
 
 
-async def __yield_messages(content: str, thread: Thread) -> AsyncIterable[__MessageStreamPayload]:
+async def __yield_messages(content: str, file: Optional[bytes], thread: Thread) -> AsyncIterable[__MessageStreamPayload]:
     message = await Message.create(HumanMessage(content), thread)
     yield __MessageStreamPayload(event="message", data=message.model_dump_json())
 
     history = MESSAGES.setdefault(thread, deque())
     history.appendleft(message)
 
+    retriever: Optional[VectorStoreRetriever] = None
+    if file is not None:
+        try:
+            blob = Blob.from_data(b64decode(file))
+
+        except binascii.Error:
+            raise HTTPException(status_code=400, detail="Invalid base64 encoding")
+
+        parser = PyPDFParser()
+        retriever = Chroma.from_documents(
+            documents=list(parser.lazy_parse(blob)),
+            collection_name="rag-chroma",
+            embedding=OllamaEmbeddings(
+                model="nomic-embed-text",
+                base_url=namespace.ollama,
+            ),
+        ).as_retriever()
+
     task = asyncio.create_task(
         graph.ainvoke(
-            {"messages": [message.data]},
-            {"configurable": {"thread_id": thread.id}},
+            GraphState(messages=[message.data], temperature=1.0, retriever=retriever),
+            {
+                "configurable": {"thread_id": thread.id},
+            },
         ),
     )
 
@@ -127,12 +157,16 @@ async def send_message(
 ) -> EventSourceResponse:
     try:
         thread = THREADS[thread_id]
-
     except KeyError:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    else:
-        return EventSourceResponse(__yield_messages(body.content, thread))
+    try:
+        base64 = body.file
+        file = b64decode(base64) if base64 else None
+    except binascii.Error:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding")
+
+    return EventSourceResponse(__yield_messages(body.content, file, thread))
 
 
 @router.get(

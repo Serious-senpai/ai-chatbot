@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, List, TypedDict
+from typing import Annotated, List, Optional, TypedDict
 
+from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import StateGraph, START, END
+from langchain_core.vectorstores import VectorStoreRetriever
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 
@@ -16,28 +17,36 @@ from ..cli import namespace, parse_args
 from ..stream import ChunkStreamSingleton
 
 
-__all__ = ("graph",)
+__all__ = ("GraphState", "graph")
 
 
 parse_args()
-LLM_F = Groq(model=namespace.model, tools=[f])
+LLM_F = Groq(model=namespace.model)
+LLM_F.bind_tools([f])
 
 
-class State(TypedDict):
+class GraphState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
+    temperature: float
+    retriever: Optional[VectorStoreRetriever]
 
 
-async def chatbot(state: State, config: RunnableConfig) -> State:
-    thread_id = config["metadata"]["thread_id"]
+async def chatbot(state: GraphState, config: RunnableConfig) -> GraphState:
+    thread_id = config["configurable"]["thread_id"]
     stream = ChunkStreamSingleton()
-    async for chunk in LLM_F.astream(state["messages"]):
+
+    async for chunk in LLM_F.astream(
+        state["messages"],
+        temperature=state["temperature"],
+        retriever=state["retriever"],
+    ):
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
-    return State(messages=[message])
+    return GraphState(messages=[message], temperature=state["temperature"], retriever=state["retriever"])
 
 
-async def tools(state: State) -> State:
+async def tools(state: GraphState) -> GraphState:
     outputs: List[BaseMessage] = []
 
     async def _process(call: ToolCall) -> None:
@@ -61,10 +70,10 @@ async def tools(state: State) -> State:
     if isinstance(message, AIMessage):
         await asyncio.gather(*[_process(c) for c in message.tool_calls])
 
-    return State(messages=outputs)
+    return GraphState(messages=outputs, temperature=state["temperature"], retriever=state["retriever"])
 
 
-def route_tools(state: State) -> str:
+def route_tools(state: GraphState) -> str:
     if len(state["messages"]) == 0:
         return END
 
@@ -78,7 +87,7 @@ def route_tools(state: State) -> str:
     return "tools"
 
 
-graph_builder = StateGraph(State)
+graph_builder = StateGraph(GraphState)
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tools", tools)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, Literal, Optional, Sequence, Union
 
 import aiohttp
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -17,8 +17,11 @@ from langchain_core.messages import (
     ToolCall,
     ToolMessage,
 )
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_core.language_models.chat_models import agenerate_from_stream
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -30,9 +33,10 @@ __all__ = ("Groq",)
 
 class Groq(BaseChatModel):
 
+    __tools: List[Dict[str, Any]] = []
     __session: Optional[aiohttp.ClientSession] = None
+
     model: str
-    tools: List[BaseTool]
 
     @property
     def _session(self) -> aiohttp.ClientSession:
@@ -40,6 +44,23 @@ class Groq(BaseChatModel):
             self.__session = aiohttp.ClientSession("https://api.groq.com")
 
         return self.__session
+
+    def bind_tools(
+        self,
+        tools: Sequence[Union[Dict[str, Any], type, Callable, BaseTool]],
+        *,
+        tool_choice: Optional[Union[str, Literal["any"]]] = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, BaseMessage]:
+        for tool in tools:
+            if isinstance(tool, BaseTool):
+                self.__tools.append(convert_to_openai_tool(tool))
+            elif isinstance(tool, dict):
+                self.__tools.append(tool)
+            else:
+                raise TypeError(f"Unsupported tool: {tool!r}")
+
+        return self
 
     def _generate(
         self,
@@ -70,7 +91,8 @@ class Groq(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        temperature = kwargs.pop("temperature", 1.0)
+        temperature: Optional[float] = kwargs.get("temperature")
+        retriever: Optional[VectorStoreRetriever] = kwargs.get("retriever")
 
         async with self._session.post(
             "/openai/v1/chat/completions",
@@ -81,7 +103,7 @@ class Groq(BaseChatModel):
                 "stop": stop,
                 "stream": True,
                 "temperature": temperature,
-                "tools": [convert_to_openai_tool(tool) for tool in self.tools],
+                "tools": self.__tools,
             },
             headers={
                 "Authorization": f"Bearer {GROQ_API_KEY}",
