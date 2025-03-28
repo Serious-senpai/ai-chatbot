@@ -20,7 +20,7 @@ __all__ = ("graph",)
 
 
 parse_args()
-LLM_SEARCH = Groq(model=namespace.model, tools=[f])
+LLM_F = Groq(model=namespace.model, tools=[f])
 
 
 class State(TypedDict):
@@ -30,7 +30,7 @@ class State(TypedDict):
 async def chatbot(state: State, config: RunnableConfig) -> State:
     thread_id = config["metadata"]["thread_id"]
     stream = ChunkStreamSingleton()
-    async for chunk in LLM_SEARCH.astream(state["messages"]):
+    async for chunk in LLM_F.astream(state["messages"]):
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
