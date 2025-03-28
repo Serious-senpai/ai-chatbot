@@ -98,14 +98,14 @@ async def __yield_messages(content: str, thread: Thread) -> AsyncIterable[__Mess
             )
             to_cancel.extend(pending)
 
-            for item in done:
-                if isinstance(item, BaseMessageChunk):
-                    chunk = await queue.get()
-                    yield __MessageStreamPayload(event="chunk", data=chunk.model_dump_json())
+            for t in done:
+                result = await t
+                if isinstance(result, BaseMessageChunk):
+                    yield __MessageStreamPayload(event="chunk", data=result.model_dump_json())
 
-        for task in to_cancel:
-            if not task.done():
-                task.cancel()
+        for t in to_cancel:
+            if not t.done():
+                t.cancel()
 
     finally:
         stream.unsubscribe(thread.id, queue)
