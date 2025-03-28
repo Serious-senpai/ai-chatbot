@@ -59,6 +59,13 @@ async def search(query: str) -> Result[TavilyResponse]:
         return Result(result=await response.json(encoding="utf-8"))
 
 
+@tool
+def f(x: float) -> Result[float]:
+    """Special function f"""
+    return Result(result=x ** 2 - 1)
+
+
 TOOLS = {
     "search": search,
+    "f": f,
 }
