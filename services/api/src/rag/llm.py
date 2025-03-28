@@ -21,7 +21,6 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
-from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_core.language_models.chat_models import agenerate_from_stream
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -92,7 +91,6 @@ class Groq(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         temperature: Optional[float] = kwargs.get("temperature")
-        retriever: Optional[VectorStoreRetriever] = kwargs.get("retriever")
 
         async with self._session.post(
             "/openai/v1/chat/completions",
