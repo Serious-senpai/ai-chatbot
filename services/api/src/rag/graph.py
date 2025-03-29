@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, List, Literal, Optional, TypedDict, cast
+from typing import Annotated, List, Literal, TypedDict, cast
 
 from langchain import hub
 from langgraph.graph import StateGraph, START, END
