@@ -103,7 +103,7 @@ async def __yield_messages(
         parser = PyPDFParser()
         retriever = Chroma.from_documents(
             documents=list(parser.lazy_parse(blob)),
-            collection_name="rag-chroma",
+            collection_name=str(thread.id),
             embedding=OllamaEmbeddings(
                 model=namespace.embed,
                 base_url=namespace.ollama,

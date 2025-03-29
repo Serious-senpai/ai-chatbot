@@ -26,15 +26,18 @@ else:
 @asynccontextmanager
 async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
     http = HTTPSessionSingleton()
-
-    ollama = URL(namespace.ollama)
     await http.prepare()
-    async with http.session.post(
-        ollama.with_path("/api/pull"),
-        json={"model": namespace.embed},
-    ) as response:
-        await response.read()
-        print(response.status, file=sys.stderr)
+
+    async def _pull_embedding_model() -> None:
+        ollama = URL(namespace.ollama)
+        async with http.session.post(
+            ollama.with_path("/api/pull"),
+            json={"model": namespace.embed},
+        ) as response:
+            await response.read()
+            print(response.status, file=sys.stderr)
+
+    asyncio.create_task(_pull_embedding_model())
 
     yield
     await http.close()
