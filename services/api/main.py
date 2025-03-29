@@ -9,6 +9,7 @@ from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
+from yarl import URL
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import HTTPSessionSingleton, namespace, parse_args
@@ -24,11 +25,22 @@ else:
 
 @asynccontextmanager
 async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    session = HTTPSessionSingleton()
+    http = HTTPSessionSingleton()
+
+    ollama = URL(namespace.ollama)
+    await http.prepare()
+    async with http.session.post(
+        ollama.with_path("/api/pull"),
+        json={"model": namespace.embed},
+    ) as response:
+        await response.read()
+        print(response.status, file=sys.stderr)
+
     yield
-    await session.close()
+    await http.close()
 
 
+parse_args()
 app = FastAPI(
     title="AI Chatbot API",
     summary="HTTP API for AI Chatbot",
@@ -37,7 +49,6 @@ app = FastAPI(
 )
 app.include_router(chat.router)
 
-parse_args()
 if namespace.cors:
     app.add_middleware(
         CORSMiddleware,

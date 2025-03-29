@@ -23,7 +23,7 @@ class PageState {
 
         const initial = route.query.initial;
         if (initial && this.history.value.length === 0) {
-          send(initial as string);
+          send(initial as string, null);
         }
       },
     );
@@ -39,9 +39,9 @@ async function fetchHistory(): Promise<void> {
   }
 }
 
-function send(text: string): void {
+async function send(text: string, file: File | null): Promise<void> {
   if (state.thread && text) {
-    const sse = state.thread.send(text);
+    const sse = await state.thread.send(text, file);
     sse.addEventListener(
       "message",
       (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -56,7 +56,7 @@ function send(text: string): void {
         if (thread) {
           let content = state.streamMessage.value?.data.content ?? "";
           content += JSON.parse(e.data).content;
-          state.streamMessage.value = new Message(0n, new LangChainMessage(content, "ai"), thread);
+          state.streamMessage.value = new Message(0n, new LangChainMessage(content, "ai"), null, thread);
         }
       }
     );

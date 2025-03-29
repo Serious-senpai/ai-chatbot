@@ -22,6 +22,9 @@ const isHuman = ref(props.message.data.type === "human");
       <span class="fs-6 text-info">{{ message.renderAuthor }}</span>
       <span class="time text-secondary">{{ message.renderCreatedAt }}</span>
     </div>
+    <div v-if="message.attachment" class="text-warning">
+      [Attachment {{ message.attachment }}]
+    </div>
     <div class="fs-6 text-white" v-html="MARKDOWN.makeHtml(message.renderContent)">
     </div>
   </div>
