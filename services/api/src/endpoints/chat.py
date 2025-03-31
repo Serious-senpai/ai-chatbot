@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import binascii
+from base64 import b64decode
 from collections import deque
-from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, TypedDict
+from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException
+from langchain_ollama import OllamaEmbeddings
 from pydantic import BaseModel, Field
-from langchain_core.messages import HumanMessage
+from langchain_community.document_loaders.parsers import PyPDFParser
+from langchain_community.vectorstores import Chroma
+from langchain_core.messages import BaseMessageChunk, HumanMessage
 from sse_starlette.sse import EventSourceResponse
+from langchain_core.documents.base import Blob
 
+from ..cli import namespace, parse_args
+from ..config import EMBEDDING_MODEL_READY
 from ..models import Message, Thread
-from ..rag import graph
+from ..rag import GraphState, graph
+from ..retriever import RetrieverSingleton
 from ..stream import ChunkStreamSingleton
 
 
@@ -20,6 +29,7 @@ router = APIRouter(
 )
 
 
+parse_args()
 THREADS: Dict[int, Thread] = {}
 MESSAGES: Dict[Thread, Deque[Message]] = {}
 
@@ -58,42 +68,104 @@ async def get_thread(thread_id: int) -> Thread:
 
 
 class __MessageStreamPayload(TypedDict):
-    event: Literal["message", "chunk"]
-    data: Any
+    event: Literal["ai", "event", "chunk"]
+    data: str
+
+
+class __AttachmentPayload(BaseModel):
+    filename: Annotated[str, Field(description="File name")]
+    data: Annotated[str, Field(description="The base64-encoded file data")]
 
 
 class __CreateMessageBody(BaseModel):
     content: Annotated[str, Field(description="The content of the message")]
+    file: Annotated[Optional[__AttachmentPayload], Field(description="The file to send")] = None
 
 
-async def __yield_messages(content: str, thread: Thread) -> AsyncIterable[__MessageStreamPayload]:
-    message = await Message.create(HumanMessage(content), thread)
-    yield __MessageStreamPayload(event="message", data=message.model_dump_json())
+async def __yield_messages(
+    content: str,
+    filename: Optional[str],
+    data: Optional[bytes],
+    thread: Thread,
+) -> AsyncIterable[__MessageStreamPayload]:
+    message = await Message.create(HumanMessage(content), filename, thread)
+    yield __MessageStreamPayload(event="ai", data=message.model_dump_json())
+
+    await asyncio.sleep(0)
 
     history = MESSAGES.setdefault(thread, deque())
     history.appendleft(message)
 
+    if data is not None:
+        blob = Blob.from_data(data)
+
+        parser = PyPDFParser()
+
+        yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server")
+        await EMBEDDING_MODEL_READY.wait()
+
+        yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}")
+        retriever = Chroma.from_documents(
+            documents=list(parser.lazy_parse(blob)),
+            collection_name=str(thread.id),
+            embedding=OllamaEmbeddings(
+                model=namespace.embed,
+                base_url=namespace.ollama,
+            ),
+        ).as_retriever()
+        RetrieverSingleton().retrievers[thread.id] = retriever
+
     task = asyncio.create_task(
         graph.ainvoke(
-            {"messages": [message.data]},
-            {"configurable": {"thread_id": thread.id}},
+            GraphState(
+                messages=[message.data],
+                temperature=1.0,
+                documents=[],
+                rag_generation="",
+            ),
+            {
+                "configurable": {"thread_id": thread.id},
+            },
         ),
     )
 
     stream = ChunkStreamSingleton()
     queue = stream.subscribe(thread.id)
-    while True:
-        chunk = await queue.get()
-        yield __MessageStreamPayload(event="chunk", data=chunk.model_dump_json())
+    try:
+        # Stop streaming immediately when a complete answer is available
+        event = asyncio.Event()
+        stream.listen(thread.id, lambda _: event.set())
 
-        if chunk.response_metadata.get("done", False):
-            stream.unsubscribe(thread.id, queue)
-            break
+        to_cancel: List[asyncio.Task[Any]] = []
+        while not event.is_set():
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(event.wait()),
+                    asyncio.create_task(queue.get()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            to_cancel.extend(pending)
 
-    data = await task
-    ai_message = await Message.create(data["messages"][-1], thread)
+            for t in done:
+                result = await t
+                if isinstance(result, BaseMessageChunk):
+                    yield __MessageStreamPayload(event="chunk", data=result.model_dump_json())
+
+        for t in to_cancel:
+            if not t.done():
+                t.cancel()
+
+    finally:
+        stream.unsubscribe(thread.id, queue)
+
+    response = await task
+    RetrieverSingleton().retrievers.pop(thread.id, None)
+
+    ai_message = await Message.create(response["messages"][-1], None, thread)
     history.appendleft(ai_message)
-    yield __MessageStreamPayload(event="message", data=ai_message.model_dump_json())
+
+    yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
 
 
 @router.post(
@@ -107,12 +179,17 @@ async def send_message(
 ) -> EventSourceResponse:
     try:
         thread = THREADS[thread_id]
-
     except KeyError:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    else:
-        return EventSourceResponse(__yield_messages(body.content, thread))
+    try:
+        file = body.file
+        filename = file.filename if file else None
+        data = b64decode(file.data.encode("utf-8"), validate=True) if file else None
+    except binascii.Error:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding")
+
+    return EventSourceResponse(__yield_messages(body.content, filename, data, thread))
 
 
 @router.get(

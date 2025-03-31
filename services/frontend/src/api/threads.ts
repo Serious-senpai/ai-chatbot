@@ -15,15 +15,45 @@ export class Thread extends Snowflake {
     return messages.map(Message.parse);
   }
 
-  public send(content: string): SSE {
+  public async send(content: string, file: File | null): Promise<SSE> {
     const uri = client.getUri({ url: `/chat/${this.id}/messages` });
+    const data = {
+      content: content,
+      file: await new Promise(
+        (resolve, reject) => {
+          if (file !== null) {
+            const reader = new FileReader();
+            reader.onload = (e: ProgressEvent<FileReader>) => {
+              let b64 = e.target?.result;
+              if (typeof b64 === "string") {
+                b64 = b64.split(",")[1];
+                resolve({
+                  filename: file.name,
+                  data: b64
+                });
+              } else {
+                reject(new Error("Failed to read file"));
+              }
+            };
+            reader.onerror = (e: ProgressEvent<FileReader>) => {
+              reject(e);
+            };
+
+            reader.readAsDataURL(file);
+          } else {
+            resolve(null);
+          }
+        }
+      ),
+    };
+
     return new SSE(
       uri,
       {
         headers: {
           "Content-Type": "application/json",
         },
-        payload: `{"content": "${content}"}`,
+        payload: JSON.stringify(data),
       },
     );
   }
@@ -78,16 +108,28 @@ export class LangChainMessage {
 
 export class Message extends Snowflake {
   public readonly data: LangChainMessage;
+  public readonly attachment: string | null;
   public readonly thread: Thread;
 
-  public constructor(id: bigint, data: LangChainMessage, thread: Thread) {
+  public constructor(
+    id: bigint,
+    data: LangChainMessage,
+    attachment: string | null,
+    thread: Thread,
+  ) {
     super(id);
     this.data = data;
+    this.attachment = attachment;
     this.thread = thread;
   }
 
   public static parse(data: Message): Message {
-    return new Message(BigInt(data.id), LangChainMessage.parse(data.data), Thread.parse(data.thread));
+    return new Message(
+      BigInt(data.id),
+      LangChainMessage.parse(data.data),
+      data.attachment,
+      Thread.parse(data.thread),
+    );
   }
 
   public get renderAuthor(): string {
