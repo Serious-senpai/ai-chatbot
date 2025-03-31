@@ -30,7 +30,7 @@ __parser.add_argument("--workers", type=int, required=False, help="The number of
 __parser.add_argument("--log-level", type=str, default="debug", help="The log level for the application")
 __parser.add_argument("--model", type=str, default="qwen-2.5-32b", help="The LLM to use in Groq API")
 __parser.add_argument("--embed", type=str, default="nomic-embed-text", help="The embedding model to use in Ollama service")
-__parser.add_argument("--ollama", type=str, default="http://ollama:11434", help="The base URL for Ollama service")
+__parser.add_argument("--ollama", type=str, default="http://localhost:11434", help="The base URL for Ollama service")
 __parser.add_argument("--cors", action="store_true", help="Enable CORS for the HTTP server")
 
 

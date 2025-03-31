@@ -101,19 +101,26 @@ async def __yield_messages(
 
         parser = PyPDFParser()
 
-        yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server")
+        yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server...")
         await EMBEDDING_MODEL_READY.wait()
 
-        yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}")
-        retriever = Chroma.from_documents(
+        yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}...")
+        await asyncio.sleep(0)
+
+        chroma = await asyncio.to_thread(
+            Chroma.from_documents,
             documents=list(parser.lazy_parse(blob)),
             collection_name=str(thread.id),
             embedding=OllamaEmbeddings(
                 model=namespace.embed,
                 base_url=namespace.ollama,
             ),
-        ).as_retriever()
+        )
+        retriever = chroma.as_retriever()
         RetrieverSingleton().retrievers[thread.id] = retriever
+
+    yield __MessageStreamPayload(event="event", data="Generating response...")
+    await asyncio.sleep(0)
 
     task = asyncio.create_task(
         graph.ainvoke(

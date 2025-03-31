@@ -9,9 +9,10 @@ from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
+from yarl import URL
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import HTTPSessionSingleton, namespace, parse_args
+from src import EMBEDDING_MODEL_READY, HTTPSessionSingleton, namespace, parse_args
 from src.endpoints import chat
 
 try:
@@ -24,11 +25,26 @@ else:
 
 @asynccontextmanager
 async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    session = HTTPSessionSingleton()
+    http = HTTPSessionSingleton()
+    await http.prepare()
+
+    async def _pull_embedding_model() -> None:
+        ollama = URL(namespace.ollama)
+        async with http.session.post(
+            ollama.with_path("/api/pull"),
+            json={"model": namespace.embed, "stream": False},
+        ) as response:
+            await response.read()
+            print(f"Download {namespace.embed!r} {response.status}", file=sys.stderr)
+            EMBEDDING_MODEL_READY.set()
+
+    asyncio.create_task(_pull_embedding_model())
+
     yield
-    await session.close()
+    await http.close()
 
 
+parse_args()
 app = FastAPI(
     title="AI Chatbot API",
     summary="HTTP API for AI Chatbot",
@@ -37,7 +53,6 @@ app = FastAPI(
 )
 app.include_router(chat.router)
 
-parse_args()
 if namespace.cors:
     app.add_middleware(
         CORSMiddleware,
