@@ -10,10 +10,6 @@ const props = defineProps(
       type: Message,
       required: true,
     },
-    extra: {
-      type: String,
-      required: false,
-    }
   },
 );
 
@@ -28,9 +24,6 @@ const isHuman = ref(props.message.data.type === "human");
     </div>
     <div v-if="message.attachment" class="text-warning">
       [Attachment {{ message.attachment }}]
-    </div>
-    <div v-if="extra" class="text-info">
-      {{ extra }}
     </div>
     <div class="fs-6 text-white" v-html="MARKDOWN.makeHtml(message.renderContent)">
     </div>

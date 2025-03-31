@@ -14,9 +14,9 @@ const store = useStore();
 class PageState {
   public readonly history = ref([] as Message[]);
   public readonly streamMessage = ref(null as Message | null);
-  public readonly streamExtra = ref(null as string | null);
 
   public thread: Thread | null = null;
+  public streaming: boolean = false;
 
   public constructor(id?: string) {
     Thread.fetch(BigInt(id ?? route.params.id as string)).then(
@@ -58,7 +58,14 @@ async function send(text: string, file: File | null): Promise<void> {
         const thread = state.thread;
         if (thread) {
           let content = state.streamMessage.value?.data.content ?? "";
-          content += JSON.parse(e.data).content;
+          let newContent = JSON.parse(e.data).content;
+          if (state.streaming) {
+            state.streaming = false;
+            content = newContent;
+          } else {
+            content += newContent;
+          }
+
           state.streamMessage.value = new Message(0n, new LangChainMessage(content, "ai"), null, thread);
         }
       }
@@ -66,7 +73,11 @@ async function send(text: string, file: File | null): Promise<void> {
     sse.addEventListener(
       "event",
       (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
-        state.streamExtra.value = e.data;
+        state.streaming = true;
+        const thread = state.thread;
+        if (thread) {
+          state.streamMessage.value = new Message(0n, new LangChainMessage(e.data, "ai"), null, thread);
+        }
       }
     );
   }
@@ -85,7 +96,7 @@ onBeforeRouteUpdate(
     <div class="main d-flex flex-column h-100 w-100">
       <div class="d-flex flex-column-reverse flex-grow-1 overflow-y-scroll px-1 w-100">
         <div v-if="state.streamMessage.value">
-          <MessageTile :message="state.streamMessage.value" :extra="state.streamExtra.value ?? undefined"></MessageTile>
+          <MessageTile :message="state.streamMessage.value"></MessageTile>
         </div>
         <MessageTile v-for="m in state.history.value" :message="m" :key="m.id.toString()" />
       </div>
