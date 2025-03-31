@@ -58,7 +58,7 @@ async function send(text: string, file: File | null): Promise<void> {
         const thread = state.thread;
         if (thread) {
           let content = state.streamMessage.value?.data.content ?? "";
-          let newContent = JSON.parse(e.data).content;
+          const newContent = JSON.parse(e.data).content;
           if (state.streaming) {
             state.streaming = false;
             content = newContent;
