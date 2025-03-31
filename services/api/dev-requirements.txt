@@ -90,7 +90,7 @@ pycodestyle==2.12.1
 pydantic==2.10.6
 pydantic-settings==2.8.1
 pydantic_core==2.27.2
-pyflakes==3.2.0
+pyflakes==3.3.2
 Pygments==2.19.1
 pypdf==5.4.0
 PyPika==0.48.9
