@@ -15,6 +15,7 @@
     "axios": "^1.8.1",
     "bootstrap": "^5.3.3",
     "json-bigint": "^1.0.0",
+    "pinia": "^3.0.1",
     "showdown": "^2.1.0",
     "sse.js": "^2.6.0",
     "vue": "^3.5.13",

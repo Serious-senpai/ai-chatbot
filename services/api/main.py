@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from yarl import URL
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import HTTPSessionSingleton, namespace, parse_args
+from src import EMBEDDING_MODEL_READY, HTTPSessionSingleton, namespace, parse_args
 from src.endpoints import chat
 
 try:
@@ -32,10 +32,11 @@ async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
         ollama = URL(namespace.ollama)
         async with http.session.post(
             ollama.with_path("/api/pull"),
-            json={"model": namespace.embed},
+            json={"model": namespace.embed, "stream": False},
         ) as response:
             await response.read()
-            print(response.status, file=sys.stderr)
+            print(f"Download {namespace.embed!r} {response.status}", file=sys.stderr)
+            EMBEDDING_MODEL_READY.set()
 
     asyncio.create_task(_pull_embedding_model())
 

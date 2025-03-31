@@ -16,6 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from langchain_core.documents.base import Blob
 
 from ..cli import namespace, parse_args
+from ..config import EMBEDDING_MODEL_READY
 from ..models import Message, Thread
 from ..rag import GraphState, graph
 from ..retriever import RetrieverSingleton
@@ -67,8 +68,8 @@ async def get_thread(thread_id: int) -> Thread:
 
 
 class __MessageStreamPayload(TypedDict):
-    event: Literal["message", "chunk"]
-    data: Any
+    event: Literal["ai", "event", "chunk"]
+    data: str
 
 
 class __AttachmentPayload(BaseModel):
@@ -88,7 +89,7 @@ async def __yield_messages(
     thread: Thread,
 ) -> AsyncIterable[__MessageStreamPayload]:
     message = await Message.create(HumanMessage(content), filename, thread)
-    yield __MessageStreamPayload(event="message", data=message.model_dump_json())
+    yield __MessageStreamPayload(event="ai", data=message.model_dump_json())
 
     await asyncio.sleep(0)
 
@@ -99,6 +100,11 @@ async def __yield_messages(
         blob = Blob.from_data(data)
 
         parser = PyPDFParser()
+
+        yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server")
+        await EMBEDDING_MODEL_READY.wait()
+
+        yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}")
         retriever = Chroma.from_documents(
             documents=list(parser.lazy_parse(blob)),
             collection_name=str(thread.id),
@@ -159,7 +165,7 @@ async def __yield_messages(
     ai_message = await Message.create(response["messages"][-1], None, thread)
     history.appendleft(ai_message)
 
-    yield __MessageStreamPayload(event="message", data=ai_message.model_dump_json())
+    yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
 
 
 @router.post(

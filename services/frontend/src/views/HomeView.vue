@@ -4,13 +4,16 @@ import { useRouter } from "vue-router";
 import { Thread } from "../api/threads";
 import ChatInput from "../components/ChatInput.vue";
 import ThreadListBar from "../components/ThreadListBar.vue";
+import useStore from "../store/index";
 
 const router = useRouter();
+const store = useStore();
 
-async function send(text: string): Promise<void> {
-  if (text) {
+async function send(input: string, file: File | null): Promise<void> {
+  if (input) {
     const thread = await Thread.create();
-    router.push({ path: `/threads/${thread.id}`, query: { initial: text } });
+    store.setInitialMessage(input, file);
+    router.push(`/threads/${thread.id}`);
   }
 }
 </script>
