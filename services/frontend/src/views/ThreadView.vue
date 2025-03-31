@@ -47,14 +47,14 @@ async function send(text: string, file: File | null): Promise<void> {
     const sse = await state.thread.send(text, file);
     sse.addEventListener(
       "ai",
-      (e: CustomEvent) => {
+      (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
         const m = Message.parse(JSON.parse(e.data));
         state.streamMessage.value = null;
         state.history.value.unshift(m);
       });
     sse.addEventListener(
       "chunk",
-      (e: CustomEvent) => {
+      (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
         const thread = state.thread;
         if (thread) {
           let content = state.streamMessage.value?.data.content ?? "";
@@ -65,7 +65,7 @@ async function send(text: string, file: File | null): Promise<void> {
     );
     sse.addEventListener(
       "event",
-      (e: CustomEvent) => {
+      (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
         state.streamExtra.value = e.data;
       }
     );
@@ -85,7 +85,7 @@ onBeforeRouteUpdate(
     <div class="main d-flex flex-column h-100 w-100">
       <div class="d-flex flex-column-reverse flex-grow-1 overflow-y-scroll px-1 w-100">
         <div v-if="state.streamMessage.value">
-          <MessageTile :message="state.streamMessage.value" :extra="state.streamExtra.value"></MessageTile>
+          <MessageTile :message="state.streamMessage.value" :extra="state.streamExtra.value ?? undefined"></MessageTile>
         </div>
         <MessageTile v-for="m in state.history.value" :message="m" :key="m.id.toString()" />
       </div>
