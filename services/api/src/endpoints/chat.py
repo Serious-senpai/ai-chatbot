@@ -19,7 +19,7 @@ from ..cli import namespace, parse_args
 from ..config import EMBEDDING_MODEL_READY
 from ..models import Message, Thread
 from ..rag import GraphState, graph
-from ..retriever import RetrieverSingleton
+from ..state import ThreadStateSingleton
 from ..stream import ChunkStreamSingleton
 
 
@@ -88,91 +88,93 @@ async def __yield_messages(
     data: Optional[bytes],
     thread: Thread,
 ) -> AsyncIterable[__MessageStreamPayload]:
-    message = await Message.create(HumanMessage(content), filename, thread)
-    yield __MessageStreamPayload(event="ai", data=message.model_dump_json())
+    state = ThreadStateSingleton()
+    async with state.lock(thread.id):
+        message = await Message.create(HumanMessage(content), filename, thread)
+        yield __MessageStreamPayload(event="ai", data=message.model_dump_json())
 
-    await asyncio.sleep(0)
-
-    history = MESSAGES.setdefault(thread, deque())
-    history.appendleft(message)
-
-    if data is not None:
-        blob = Blob.from_data(data)
-
-        parser = PyPDFParser()
-
-        yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server...")
-        await EMBEDDING_MODEL_READY.wait()
-
-        yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}...")
         await asyncio.sleep(0)
 
-        chroma = await asyncio.to_thread(
-            Chroma.from_documents,
-            documents=list(parser.lazy_parse(blob)),
-            collection_name=str(thread.id),
-            embedding=OllamaEmbeddings(
-                model=namespace.embed,
-                base_url=namespace.ollama,
+        history = MESSAGES.setdefault(thread, deque())
+        history.appendleft(message)
+
+        if data is not None:
+            blob = Blob.from_data(data)
+
+            parser = PyPDFParser()
+
+            yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server...")
+            await EMBEDDING_MODEL_READY.wait()
+
+            yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}...")
+            await asyncio.sleep(0)
+
+            chroma = await asyncio.to_thread(
+                Chroma.from_documents,
+                documents=list(parser.lazy_parse(blob)),
+                collection_name=str(thread.id),
+                embedding=OllamaEmbeddings(
+                    model=namespace.embed,
+                    base_url=namespace.ollama,
+                ),
+            )
+            retriever = chroma.as_retriever()
+            state.retrievers[thread.id] = retriever
+
+        yield __MessageStreamPayload(event="event", data="Generating response...")
+        await asyncio.sleep(0)
+
+        task = asyncio.create_task(
+            graph.ainvoke(
+                GraphState(
+                    messages=[message.data],
+                    temperature=1.0,
+                    documents=[],
+                    rag_generation="",
+                ),
+                {
+                    "configurable": {"thread_id": thread.id},
+                },
             ),
         )
-        retriever = chroma.as_retriever()
-        RetrieverSingleton().retrievers[thread.id] = retriever
 
-    yield __MessageStreamPayload(event="event", data="Generating response...")
-    await asyncio.sleep(0)
+        stream = ChunkStreamSingleton()
+        queue = stream.subscribe(thread.id)
+        try:
+            # Stop streaming immediately when a complete answer is available
+            event = asyncio.Event()
+            stream.listen(thread.id, lambda _: event.set())
 
-    task = asyncio.create_task(
-        graph.ainvoke(
-            GraphState(
-                messages=[message.data],
-                temperature=1.0,
-                documents=[],
-                rag_generation="",
-            ),
-            {
-                "configurable": {"thread_id": thread.id},
-            },
-        ),
-    )
+            to_cancel: List[asyncio.Task[Any]] = []
+            while not event.is_set():
+                done, pending = await asyncio.wait(
+                    [
+                        asyncio.create_task(event.wait()),
+                        asyncio.create_task(queue.get()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                to_cancel.extend(pending)
 
-    stream = ChunkStreamSingleton()
-    queue = stream.subscribe(thread.id)
-    try:
-        # Stop streaming immediately when a complete answer is available
-        event = asyncio.Event()
-        stream.listen(thread.id, lambda _: event.set())
+                for t in done:
+                    result = await t
+                    if isinstance(result, BaseMessageChunk):
+                        yield __MessageStreamPayload(event="chunk", data=result.model_dump_json())
 
-        to_cancel: List[asyncio.Task[Any]] = []
-        while not event.is_set():
-            done, pending = await asyncio.wait(
-                [
-                    asyncio.create_task(event.wait()),
-                    asyncio.create_task(queue.get()),
-                ],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            to_cancel.extend(pending)
+            for t in to_cancel:
+                if not t.done():
+                    t.cancel()
 
-            for t in done:
-                result = await t
-                if isinstance(result, BaseMessageChunk):
-                    yield __MessageStreamPayload(event="chunk", data=result.model_dump_json())
+        finally:
+            stream.unsubscribe(thread.id, queue)
 
-        for t in to_cancel:
-            if not t.done():
-                t.cancel()
+        response = await task
+        state.retrievers.pop(thread.id, None)
 
-    finally:
-        stream.unsubscribe(thread.id, queue)
+        ai_message = await Message.create(response["messages"][-1], None, thread)
+        history.appendleft(ai_message)
 
-    response = await task
-    RetrieverSingleton().retrievers.pop(thread.id, None)
-
-    ai_message = await Message.create(response["messages"][-1], None, thread)
-    history.appendleft(ai_message)
-
-    yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
+        yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
 
 
 @router.post(

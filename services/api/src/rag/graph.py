@@ -17,7 +17,7 @@ from .llm import Groq
 from .results import Result
 from .tools import search, TOOLS
 from ..cli import namespace, parse_args
-from ..retriever import RetrieverSingleton
+from ..state import ThreadStateSingleton
 from ..stream import ChunkStreamSingleton
 
 
@@ -102,7 +102,7 @@ __VECTORSTORE_CHAIN = __VECTORSTORE_PROMPT | __VECTORSTORE_LLM | StrOutputParser
 
 async def __vectorstore(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
-    retriever = RetrieverSingleton().retrievers.get(thread_id)
+    retriever = ThreadStateSingleton().retrievers.get(thread_id)
     if retriever is not None:
         documents = await retriever.ainvoke(cast(str, state["messages"][-1].content))
     else:
