@@ -15,7 +15,7 @@ export class Thread extends Snowflake {
     return messages.map(Message.parse);
   }
 
-  public async send(content: string, file: File | null): Promise<SSE> {
+  public async send(content: string, file: File | null, temperature: number): Promise<SSE> {
     const uri = client.getUri({ url: `/chat/${this.id}/messages` });
     const data = {
       content: content,
@@ -45,6 +45,7 @@ export class Thread extends Snowflake {
           }
         }
       ),
+      temperature,
     };
 
     return new SSE(

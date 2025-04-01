@@ -42,7 +42,7 @@ function submit(): void {
 
 <template>
   <form @submit.prevent="submit" class="d-flex flex-row">
-    <input @click.prevent="uploadFileClick" class="d-inline-block p-1" style="width: 100px" :value="file?.name ?? 'Upload file'" type="button" />
+    <input @click.prevent="uploadFileClick" class="d-inline-block p-1 rounded-1" style="width: 100px" :value="file?.name ?? 'Upload file'" type="button" />
     <input @change.prevent="uploadFile" accept=".pdf" class="d-none" ref="upload-file" type="file" />
     <input @submit.prevent="submit" v-model="input" class="bg-secondary d-inline-block flex-grow-1 p-1 rounded-2 text-white" autocomplete="off" autocorrect="off" spellcheck="true" placeholder="Ask anything" type="text" />
   </form>

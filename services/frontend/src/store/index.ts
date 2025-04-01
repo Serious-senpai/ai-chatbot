@@ -10,6 +10,7 @@ const useStore = defineStore(
   {
     state: () => ({
       initial: null as InitialMessage | null,
+      temperature: 1.0,
     }),
     actions: {
       setInitialMessage(input: string, file: File | null): void {

@@ -44,7 +44,7 @@ async function fetchHistory(): Promise<void> {
 
 async function send(text: string, file: File | null): Promise<void> {
   if (state.thread && text) {
-    const sse = await state.thread.send(text, file);
+    const sse = await state.thread.send(text, file, store.$state.temperature);
     sse.addEventListener(
       "ai",
       (e: any) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -93,15 +93,27 @@ onBeforeRouteUpdate(
 
 <template>
   <ThreadListBar :key="useRoute().params.id as string">
-    <div class="main d-flex flex-column h-100 w-100">
-      <div class="d-flex flex-column-reverse flex-grow-1 overflow-y-scroll px-1 w-100">
-        <div v-if="state.streamMessage.value">
-          <MessageTile :message="state.streamMessage.value"></MessageTile>
+    <div class="main d-grid h-100 w-100">
+      <div class="d-flex flex-column h-100 w-100">
+        <div class="flex-grow-1 overflow-y-scroll px-1 w-100">
+          <MessageTile v-for="m in state.history.value.slice().reverse()" :message="m" :key="m.id.toString()" />
+          <div v-if="state.streamMessage.value">
+            <MessageTile :message="state.streamMessage.value"></MessageTile>
+          </div>
         </div>
-        <MessageTile v-for="m in state.history.value" :message="m" :key="m.id.toString()" />
+        <div class="px-3 py-3 w-100">
+          <ChatInput :onSubmit="send"></ChatInput>
+        </div>
       </div>
-      <div class="px-3 py-3 w-100">
-        <ChatInput :onSubmit="send"></ChatInput>
+      <div class="h-100 p-2 text-white w-100">
+        <h5>Model settings</h5>
+        <div class="separator"></div>
+        <h6>Temperature</h6>
+        <div class="d-flex flex-row">
+          <input class="d-block flex-grow-1 p-1" type="range" min="0" max="2" step="0.1" v-model="store.$state.temperature">
+          <div class="separator"></div>
+          <span class="d-block">{{ store.$state.temperature }}</span>
+        </div>
       </div>
     </div>
   </ThreadListBar>
@@ -109,12 +121,18 @@ onBeforeRouteUpdate(
 
 <style lang="css" scoped>
 .main {
-  padding-right: 0;
+  grid-template-columns: 1fr 0;
+  grid-template-rows: 100%;
+}
+
+.separator {
+  height: 1rem;
+  width: 1rem;
 }
 
 @media (min-width: 992px) {
   .main {
-    padding-right: 300px;
+    grid-template-columns: 1fr 300px;
   }
 }
 </style>

@@ -80,12 +80,14 @@ class __AttachmentPayload(BaseModel):
 class __CreateMessageBody(BaseModel):
     content: Annotated[str, Field(description="The content of the message")]
     file: Annotated[Optional[__AttachmentPayload], Field(description="The file to send")] = None
+    temperature: Annotated[float, Field(description="The temperature for the model")] = 1.0
 
 
 async def __yield_messages(
     content: str,
     filename: Optional[str],
     data: Optional[bytes],
+    temperature: float,
     thread: Thread,
 ) -> AsyncIterable[__MessageStreamPayload]:
     state = ThreadStateSingleton()
@@ -128,7 +130,7 @@ async def __yield_messages(
             graph.ainvoke(
                 GraphState(
                     messages=[message.data],
-                    temperature=1.0,
+                    temperature=temperature,
                     documents=[],
                     rag_generation="",
                 ),
@@ -198,7 +200,7 @@ async def send_message(
     except binascii.Error:
         raise HTTPException(status_code=400, detail="Invalid base64 encoding")
 
-    return EventSourceResponse(__yield_messages(body.content, filename, data, thread))
+    return EventSourceResponse(__yield_messages(body.content, filename, data, body.temperature, thread))
 
 
 @router.get(
