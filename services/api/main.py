@@ -33,6 +33,7 @@ async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with http.session.post(
             ollama.with_path("/api/pull"),
             json={"model": namespace.embed, "stream": False},
+            timeout=None,
         ) as response:
             await response.read()
             print(f"Download {namespace.embed!r} {response.status}", file=sys.stderr)
