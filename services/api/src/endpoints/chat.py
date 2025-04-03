@@ -111,17 +111,21 @@ async def __yield_messages(
             yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}...")
             await asyncio.sleep(0)
 
-            chroma = await asyncio.to_thread(
-                Chroma.from_documents,
-                documents=list(parser.lazy_parse(blob)),
-                collection_name=str(thread.id),
-                embedding=OllamaEmbeddings(
-                    model=namespace.embed,
-                    base_url=namespace.ollama,
-                ),
-            )
-            retriever = chroma.as_retriever()
-            state.retrievers[thread.id] = retriever
+            documents = list(await asyncio.to_thread(parser.lazy_parse, blob))
+            try:
+                chroma = state.chroma[thread.id]
+                await chroma.aadd_documents(documents)
+
+            except KeyError:
+                chroma = Chroma.from_documents(
+                    documents=documents,
+                    collection_name=str(thread.id),
+                    embedding=OllamaEmbeddings(
+                        model=namespace.embed,
+                        base_url=namespace.ollama,
+                    ),
+                )
+                state.chroma[thread.id] = chroma
 
         yield __MessageStreamPayload(event="event", data="Generating response...")
         await asyncio.sleep(0)
@@ -171,7 +175,6 @@ async def __yield_messages(
             stream.unsubscribe(thread.id, queue)
 
         response = await task
-        state.retrievers.pop(thread.id, None)
 
         ai_message = await Message.create(response["messages"][-1], None, thread)
         history.appendleft(ai_message)

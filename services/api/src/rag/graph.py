@@ -115,8 +115,10 @@ __VECTORSTORE_CHAIN = __VECTORSTORE_PROMPT | __VECTORSTORE_LLM | StrOutputParser
 
 async def __vectorstore(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
-    retriever = ThreadStateSingleton().retrievers.get(thread_id)
-    if retriever is not None:
+    chroma = ThreadStateSingleton().chroma.get(thread_id)
+
+    if chroma is not None:
+        retriever = chroma.as_retriever()
         documents = await retriever.ainvoke(cast(str, state["messages"][-1].content))
     else:
         documents = []
