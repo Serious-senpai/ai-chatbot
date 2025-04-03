@@ -21,7 +21,7 @@ from ..state import ThreadStateSingleton
 from ..stream import ChunkStreamSingleton
 
 
-__all__ = ("GraphState", "graph")
+__all__ = ("GraphState", "graph", "llm_cleanup")
 
 
 parse_args()
@@ -79,16 +79,29 @@ __ROUTE_QUERY_SYSTEM = SystemMessage(
 async def __route_query(state: GraphState) -> Literal["vectorstore", "search", "chat"]:
     # Do not stream message chunks from this node
 
+    # Copy the thread history
+    history = state["messages"][:]
+
     # Insert system message at position -2
-    state["messages"].insert(-2, __ROUTE_QUERY_SYSTEM)
-    message = await __ROUTE_QUERY_LLM.ainvoke(state["messages"], temperature=state["temperature"])
+    history.insert(-2, __ROUTE_QUERY_SYSTEM)
 
-    # Remove system message
-    state["messages"].pop(-2)
+    retry = 3
+    for _ in range(retry):
+        message = await __ROUTE_QUERY_LLM.ainvoke(history, temperature=state["temperature"])
 
-    content = message.content
-    if content not in ["vectorstore", "search", "chat"]:
-        raise ValueError(f"Unexpected route_query {content!r}")
+        content = message.content
+        if content in ["vectorstore", "search", "chat"]:
+            break
+
+        history.append(message)
+        history.append(
+            HumanMessage(
+                "Your previous response is invalid. Please answer again with exactly ONE word \"vectorstore\", \"search\", or \"chat\"."
+            ),
+        )
+
+    else:
+        raise ValueError(f"Failed to route query after {retry} attempts. Last response: {content!r}")
 
     return content  # type: ignore
 
@@ -125,21 +138,19 @@ async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> Gr
     thread_id = config["configurable"]["thread_id"]
     stream = ChunkStreamSingleton()
 
-    state["messages"].append(__VECTORSTORE_SUMMARY_SYSTEM)
-    state["messages"].append(
+    history = state["messages"][:]
+    history.append(__VECTORSTORE_SUMMARY_SYSTEM)
+    history.append(
         HumanMessage("Summarize the documents below to answer my previous question:\n" + state["rag_generation"]),
     )
 
     async for chunk in __VECTORSTORE_SUMMARY_LLM.astream(
-        state["messages"],
+        history,
         temperature=state["temperature"],
     ):
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
-
-    state["messages"].pop()  # Remove the summary message
-    state["messages"].pop()  # Remove the system message
 
     return GraphState(
         messages=[message],
@@ -149,15 +160,15 @@ async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> Gr
     )
 
 
-__LLM_SEARCH = Groq(model=namespace.model)
-__LLM_SEARCH.bind_tools([search])
+__SEARCH_LLM = Groq(model=namespace.model)
+__SEARCH_LLM.bind_tools([search])
 
 
 async def __search(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
     stream = ChunkStreamSingleton()
 
-    async for chunk in __LLM_SEARCH.astream(
+    async for chunk in __SEARCH_LLM.astream(
         state["messages"],
         temperature=state["temperature"],
     ):
@@ -243,3 +254,8 @@ memory = MemorySaver()
 graph = graph_builder.compile(memory)
 # with open("graph.png", "wb") as f:
 #     f.write(graph.get_graph().draw_mermaid_png())
+
+
+async def llm_cleanup() -> None:
+    for llm in (__ROUTE_QUERY_LLM, __VECTORSTORE_LLM, __VECTORSTORE_SUMMARY_LLM, __SEARCH_LLM, __CHAT_LLM):
+        await llm.session.close()

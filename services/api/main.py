@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src import EMBEDDING_MODEL_READY, HTTPSessionSingleton, namespace, parse_args
 from src.endpoints import chat
+from src.rag import llm_cleanup
 
 try:
     import uvloop
@@ -42,7 +43,9 @@ async def __lifespan(app: FastAPI) -> AsyncGenerator[None]:
     asyncio.create_task(_pull_embedding_model())
 
     yield
+
     await http.close()
+    await llm_cleanup()
 
 
 parse_args()

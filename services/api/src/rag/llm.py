@@ -38,7 +38,7 @@ class Groq(BaseChatModel):
     model: str
 
     @property
-    def _session(self) -> aiohttp.ClientSession:
+    def session(self) -> aiohttp.ClientSession:
         if self.__session is None:
             self.__session = aiohttp.ClientSession("https://api.groq.com")
 
@@ -92,7 +92,7 @@ class Groq(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         temperature: Optional[float] = kwargs.get("temperature")
 
-        async with self._session.post(
+        async with self.session.post(
             "/openai/v1/chat/completions",
             json={
                 "messages": [self.__dump_message(message) for message in messages],
