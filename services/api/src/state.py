@@ -4,7 +4,6 @@ import asyncio
 from typing import ClassVar, Dict, Optional, TYPE_CHECKING
 
 from langchain_community.vectorstores import Chroma
-from langchain_core.vectorstores import VectorStoreRetriever
 
 
 __all__ = ("ThreadStateSingleton",)
