@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Annotated, List, Literal, TypedDict, cast
 
 from langchain import hub
@@ -67,53 +68,42 @@ async def __tools(state: GraphState) -> GraphState:
 
 
 __ROUTE_QUERY_LLM = Groq(model=namespace.model)
-__ROUTE_QUERY_SYSTEM = SystemMessage(
-    "You are an expert at routing a user's question to an appropriate tool. Analyze the user's question and determine:\n"
-    "- If the question requires searching the provided document, answer \"vectorstore\".\n"
-    "- If the question requires information you do not know or you are unsure of, answer \"search\".\n"
-    "- Otherwise, answer \"chat\".\n"
-    "Your answer must contain exactly ONE word \"vectorstore\", \"search\", or \"chat\". No yapping.\n"
-)
 
 
-async def __route_query(state: GraphState) -> Literal["vectorstore", "search", "chat"]:
-    # Do not stream message chunks from this node
-
+async def __route_query(state: GraphState) -> Literal["vectorstore", "chat"]:
     # Copy the thread history
     history = state["messages"][:]
 
     # Insert system message at position -2
-    history.insert(-2, __ROUTE_QUERY_SYSTEM)
+    history.insert(
+        -2,
+        SystemMessage(
+            "You are an expert at routing a user's question to an appropriate tool. Analyze the user's question and determine:\n"
+            "- If the question requires searching the provided document, answer \"vectorstore\".\n"
+            "- Otherwise, answer \"chat\".\n\n"
+            "Your answer must contain exactly ONE word \"vectorstore\" or \"chat\". No yapping.\n"
+        ),
+    )
 
     retry = 3
     for _ in range(retry):
         message = await __ROUTE_QUERY_LLM.ainvoke(history, temperature=state["temperature"])
 
         content = message.content
-        if content in ["vectorstore", "search", "chat"]:
-            break
+        if content in ["vectorstore", "chat"]:
+            return content  # type: ignore
 
         history.append(message)
         history.append(
             HumanMessage(
-                "Your previous response is invalid. Please answer again with exactly ONE word \"vectorstore\", \"search\", or \"chat\"."
+                "Your previous response is invalid. Please answer again with exactly ONE word \"vectorstore\" or \"chat\"."
             ),
         )
 
-    else:
-        raise ValueError(f"Failed to route query after {retry} attempts. Last response: {content!r}")
-
-    return content  # type: ignore
+    raise ValueError(f"Failed to route query after {retry} attempts. Last response: {content!r}")
 
 
-__VECTORSTORE_PROMPT = hub.pull("rlm/rag-prompt")
-assert isinstance(__VECTORSTORE_PROMPT, ChatPromptTemplate)
-
-__VECTORSTORE_LLM = Groq(model=namespace.model)
-__VECTORSTORE_CHAIN = __VECTORSTORE_PROMPT | __VECTORSTORE_LLM | StrOutputParser()
-
-
-async def __vectorstore(state: GraphState, config: RunnableConfig) -> GraphState:
+async def __vectorstore_retriever(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
     chroma = ThreadStateSingleton().chroma.get(thread_id)
 
@@ -123,17 +113,69 @@ async def __vectorstore(state: GraphState, config: RunnableConfig) -> GraphState
     else:
         documents = []
 
-    generation = await __VECTORSTORE_CHAIN.ainvoke({"context": documents, "question": state["messages"][-1].content})
     return GraphState(
         messages=[],
         temperature=state["temperature"],
         documents=documents,
+        rag_generation=state["rag_generation"],
+    )
+
+
+__ROUTE_GRADER_LLM = Groq(model=namespace.model)
+
+
+async def __route_grader(state: GraphState) -> Literal["vectorstore-generate", "chat"]:
+    # Copy the thread history
+    history: List[BaseMessage] = [
+        SystemMessage(
+            "You are a grader assessing relevance of a retrieved document to a user question.\n"
+            "It does not need to be a stringent test. The goal is to filter out erroneous retrievals.\n"
+            "- If the document contains keyword(s) or semantic meaning related to the user question, answer \"relevant\"\n"
+            "- Otherwise, answer \"irrelevant\".\n\n"
+            "Your answer must contain exactly ONE word \"relevant\" or \"irrelevant\". No yapping.\n",
+        ),
+        HumanMessage(f"Retrieved documents:\n\n{state['documents']}\n\nUser question:\n\n{state['messages'][-1]}"),
+    ]
+
+    retry = 3
+    for _ in range(retry):
+        message = await __ROUTE_GRADER_LLM.ainvoke(history, temperature=state["temperature"])
+
+        content = message.content
+        if content == "relevant":
+            return "vectorstore-generate"
+
+        if content == "irrelevant":
+            return "chat"
+
+        history.append(message)
+        history.append(
+            HumanMessage(
+                "Your previous response is invalid. Please answer again with exactly ONE word \"relevant\" or \"irrelevant\"."
+            ),
+        )
+
+    raise ValueError(f"Failed to route query after {retry} attempts. Last response: {content!r}")
+
+
+__VECTORSTORE_PROMPT = hub.pull("rlm/rag-prompt")
+assert isinstance(__VECTORSTORE_PROMPT, ChatPromptTemplate)
+
+__VECTORSTORE_LLM = Groq(model=namespace.model)
+__VECTORSTORE_CHAIN = __VECTORSTORE_PROMPT | __VECTORSTORE_LLM | StrOutputParser()
+
+
+async def __vectorstore_generate(state: GraphState) -> GraphState:
+    generation = await __VECTORSTORE_CHAIN.ainvoke({"context": state["documents"], "question": state["messages"][-1].content})
+    return GraphState(
+        messages=[],
+        temperature=state["temperature"],
+        documents=state["documents"],
         rag_generation=generation,
     )
 
 
 __VECTORSTORE_SUMMARY_LLM = Groq(model=namespace.model)
-__VECTORSTORE_SUMMARY_SYSTEM = SystemMessage("You are an expert at answering user's question based on the provided document.")
 
 
 async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> GraphState:
@@ -141,7 +183,7 @@ async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> Gr
     stream = ChunkStreamSingleton()
 
     history = state["messages"][:]
-    history.append(__VECTORSTORE_SUMMARY_SYSTEM)
+    history.append(SystemMessage("You are an expert at answering user's question based on the provided document."))
     history.append(
         HumanMessage("Summarize the documents below to answer my previous question:\n" + state["rag_generation"]),
     )
@@ -162,21 +204,47 @@ async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> Gr
     )
 
 
-__SEARCH_LLM = Groq(model=namespace.model)
-__SEARCH_LLM.bind_tools([search])
+__CHAT_LLM = Groq(model=namespace.model)
+__CHAT_LLM.bind_tools([search])
 
 
-async def __search(state: GraphState, config: RunnableConfig) -> GraphState:
+async def __chat(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
     stream = ChunkStreamSingleton()
 
-    async for chunk in __SEARCH_LLM.astream(
-        state["messages"],
+    history = state["messages"][:]
+    history.insert(
+        -2,
+        SystemMessage(
+            "Think step by step, but only keep a minimum draft for each thinking step, with 10 tokens at most.\n"
+            "Return the answer at the end of the response after a separator token\">>>>\".\n"
+            "Guidelines:\n"
+            "- Limit each step to 10 tokens.\n"
+            "- Focus on essential calculations/transformations.\n"
+            "- Maintain logical progression.\n"
+            "- Mark final answer with \">>>>\"\n"
+        ),
+    )
+
+    async for chunk in __CHAT_LLM.astream(
+        history,
         temperature=state["temperature"],
     ):
+        # print(chunk, file=sys.stderr)
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
+    message.content = str(message.content).replace("\n", "\n\n")
+    parts = [s.strip() for s in message.content.rsplit(">>>>", 2)]
+
+    if len(parts) == 2:
+        thought, message.content = parts
+    else:
+        thought = ""
+        message.content = parts[0]
+
+    print(thought, file=sys.stderr)
+
     return GraphState(
         messages=[message],
         temperature=state["temperature"],
@@ -185,7 +253,7 @@ async def __search(state: GraphState, config: RunnableConfig) -> GraphState:
     )
 
 
-def __route_search(state: GraphState) -> str:
+def __route_chat(state: GraphState) -> str:
     if len(state["messages"]) == 0:
         return END
 
@@ -199,32 +267,10 @@ def __route_search(state: GraphState) -> str:
     return "search-tool"
 
 
-__CHAT_LLM = Groq(model=namespace.model)
-
-
-async def __chat(state: GraphState, config: RunnableConfig) -> GraphState:
-    thread_id = config["configurable"]["thread_id"]
-    stream = ChunkStreamSingleton()
-
-    async for chunk in __CHAT_LLM.astream(
-        state["messages"],
-        temperature=state["temperature"],
-    ):
-        stream.add_chunk(thread_id, chunk)
-
-    message = stream.consume(thread_id)
-    return GraphState(
-        messages=[message],
-        temperature=state["temperature"],
-        documents=state["documents"],
-        rag_generation=state["rag_generation"],
-    )
-
-
 graph_builder = StateGraph(GraphState)
-graph_builder.add_node("vectorstore", __vectorstore)
-graph_builder.add_node("vector_store_summary", __vectorstore_summary)
-graph_builder.add_node("search", __search)
+graph_builder.add_node("vectorstore", __vectorstore_retriever)
+graph_builder.add_node("vectorstore-generate", __vectorstore_generate)
+graph_builder.add_node("vectorstore-summary", __vectorstore_summary)
 graph_builder.add_node("search-tool", __tools)
 graph_builder.add_node("chat", __chat)
 
@@ -232,24 +278,25 @@ graph_builder.add_node("chat", __chat)
 graph_builder.add_conditional_edges(
     START,
     __route_query,
-    ["vectorstore", "search", "chat"],
+    ["vectorstore", "chat"],
 )
 
 # Vectorstore branch
-graph_builder.add_edge("vectorstore", "vector_store_summary")
-graph_builder.add_edge("vector_store_summary", END)
-
-# Search branch
 graph_builder.add_conditional_edges(
-    "search",
-    __route_search,
-    ["search-tool", END],
+    "vectorstore",
+    __route_grader,
+    ["vectorstore-generate", "chat"],
 )
-graph_builder.add_edge("search-tool", "search")
-
+graph_builder.add_edge("vectorstore-generate", "vectorstore-summary")
+graph_builder.add_edge("vectorstore-summary", END)
 
 # Chat branch
-graph_builder.add_edge("chat", END)
+graph_builder.add_conditional_edges(
+    "chat",
+    __route_chat,
+    ["search-tool", END],
+)
+graph_builder.add_edge("search-tool", "chat")
 
 
 memory = MemorySaver()
@@ -259,5 +306,5 @@ graph = graph_builder.compile(memory)
 
 
 async def llm_cleanup() -> None:
-    for llm in (__ROUTE_QUERY_LLM, __VECTORSTORE_LLM, __VECTORSTORE_SUMMARY_LLM, __SEARCH_LLM, __CHAT_LLM):
+    for llm in (__ROUTE_QUERY_LLM, __VECTORSTORE_LLM, __ROUTE_GRADER_LLM, __VECTORSTORE_SUMMARY_LLM, __CHAT_LLM):
         await llm.session.close()

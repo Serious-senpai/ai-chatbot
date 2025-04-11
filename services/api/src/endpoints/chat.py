@@ -8,6 +8,7 @@ from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, Op
 
 from fastapi import APIRouter, HTTPException
 from langchain_ollama import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 from langchain_community.document_loaders.parsers import PyPDFParser
 from langchain_community.vectorstores import Chroma
@@ -83,6 +84,10 @@ class __CreateMessageBody(BaseModel):
     temperature: Annotated[float, Field(description="The temperature for the model")] = 1.0
 
 
+__SPLITTER = RecursiveCharacterTextSplitter()
+__PDF_PARSER = PyPDFParser()
+
+
 async def __yield_messages(
     content: str,
     filename: Optional[str],
@@ -103,15 +108,13 @@ async def __yield_messages(
         if data is not None:
             blob = Blob.from_data(data)
 
-            parser = PyPDFParser()
-
             yield __MessageStreamPayload(event="event", data=f"Pulling model {namespace.embed!r} to Ollama server...")
             await EMBEDDING_MODEL_READY.wait()
 
             yield __MessageStreamPayload(event="event", data=f"Reading {filename!r}...")
-            await asyncio.sleep(0)
 
-            documents = list(await asyncio.to_thread(parser.lazy_parse, blob))
+            documents = list(await asyncio.to_thread(__PDF_PARSER.lazy_parse, blob))
+            documents = list(await __SPLITTER.atransform_documents(documents))
             try:
                 chroma = state.chroma[thread.id]
                 await chroma.aadd_documents(documents)
@@ -148,38 +151,33 @@ async def __yield_messages(
         queue = stream.subscribe(thread.id)
         try:
             # Stop streaming immediately when a complete answer is available
-            event = asyncio.Event()
-            stream.listen(thread.id, lambda _: event.set())
-
-            to_cancel: List[asyncio.Task[Any]] = []
-            while not event.is_set():
+            completed = False
+            while not completed:
                 done, pending = await asyncio.wait(
                     [
-                        asyncio.create_task(event.wait()),
+                        task,
                         asyncio.create_task(queue.get()),
                     ],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                to_cancel.extend(pending)
 
                 for t in done:
                     result = await t
                     if isinstance(result, BaseMessageChunk):
                         yield __MessageStreamPayload(event="chunk", data=result.model_dump_json())
 
-            for t in to_cancel:
-                if not t.done():
-                    t.cancel()
+                    else:
+                        for t in pending:
+                            t.cancel()
+
+                        completed = True
+                        ai_message = await Message.create(result["messages"][-1], None, thread)
+                        history.appendleft(ai_message)
+
+                        yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
 
         finally:
             stream.unsubscribe(thread.id, queue)
-
-        response = await task
-
-        ai_message = await Message.create(response["messages"][-1], None, thread)
-        history.appendleft(ai_message)
-
-        yield __MessageStreamPayload(event="ai", data=ai_message.model_dump_json())
 
 
 @router.post(
