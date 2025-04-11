@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from typing import Annotated, List, Literal, TypedDict, cast
 
 from langchain import hub
@@ -212,38 +211,14 @@ async def __chat(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
     stream = ChunkStreamSingleton()
 
-    history = state["messages"][:]
-    history.insert(
-        -2,
-        SystemMessage(
-            "Think step by step, but only keep a minimum draft for each thinking step, with 10 tokens at most.\n"
-            "Return the answer at the end of the response after a separator token\">>>>\".\n"
-            "Guidelines:\n"
-            "- Limit each step to 10 tokens.\n"
-            "- Focus on essential calculations/transformations.\n"
-            "- Maintain logical progression.\n"
-            "- Mark final answer with \">>>>\"\n"
-        ),
-    )
-
     async for chunk in __CHAT_LLM.astream(
-        history,
+        state["messages"],
         temperature=state["temperature"],
     ):
         # print(chunk, file=sys.stderr)
         stream.add_chunk(thread_id, chunk)
 
     message = stream.consume(thread_id)
-    message.content = str(message.content).replace("\n", "\n\n")
-    parts = [s.strip() for s in message.content.rsplit(">>>>", 2)]
-
-    if len(parts) == 2:
-        thought, message.content = parts
-    else:
-        thought = ""
-        message.content = parts[0]
-
-    print(thought, file=sys.stderr)
 
     return GraphState(
         messages=[message],
