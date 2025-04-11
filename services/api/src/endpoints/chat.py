@@ -4,7 +4,7 @@ import asyncio
 import binascii
 from base64 import b64decode
 from collections import deque
-from typing import Annotated, Any, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
+from typing import Annotated, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException
 from langchain_ollama import OllamaEmbeddings
