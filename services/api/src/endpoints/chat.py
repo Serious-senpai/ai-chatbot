@@ -6,7 +6,7 @@ from base64 import b64decode
 from collections import deque
 from typing import Annotated, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
@@ -33,6 +33,22 @@ router = APIRouter(
 parse_args()
 THREADS: Dict[int, Thread] = {}
 MESSAGES: Dict[Thread, Deque[Message]] = {}
+
+
+graph_png_view = graph.get_graph().draw_mermaid_png()
+
+
+@router.get(
+    "/graph",
+    include_in_schema=False,
+)
+async def get_graph() -> Response:
+    return Response(
+        content=graph_png_view,
+        headers={
+            "Content-Type": "image/png",
+        },
+    )
 
 
 @router.post(

@@ -276,8 +276,6 @@ graph_builder.add_edge("search-tool", "chat")
 
 memory = MemorySaver()
 graph = graph_builder.compile(memory)
-# with open("graph.png", "wb") as f:
-#     f.write(graph.get_graph().draw_mermaid_png())
 
 
 async def llm_cleanup() -> None:
