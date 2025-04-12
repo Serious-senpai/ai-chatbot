@@ -10,9 +10,10 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI
 from yarl import URL
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import EMBEDDING_MODEL_READY, HTTPSessionSingleton, namespace, parse_args
+from src import EMBEDDING_MODEL_READY, HTTPSessionSingleton, ROOT, namespace, parse_args
 from src.endpoints import chat
 from src.rag import llm_cleanup
 
@@ -56,6 +57,10 @@ app = FastAPI(
     lifespan=__lifespan,
 )
 app.include_router(chat.router)
+
+outputs_dir = ROOT / "services" / "api" / "outputs"
+outputs_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
 
 if namespace.cors:
     app.add_middleware(

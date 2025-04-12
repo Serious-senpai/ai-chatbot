@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import traceback
 from typing import Annotated, List, Literal, TypedDict, cast
 
 from langchain import hub
@@ -15,7 +15,7 @@ from langgraph.graph.message import add_messages
 
 from .llm import Groq
 from .results import Result
-from .tools import search, TOOLS
+from .tools import archive, search, write_to_file, TOOLS
 from ..cli import namespace, parse_args
 from ..state import ThreadStateSingleton
 from ..stream import ChunkStreamSingleton
@@ -44,6 +44,7 @@ async def __tools(state: GraphState) -> GraphState:
 
         except Exception as e:
             result = Result(error=str(e))
+            traceback.print_exc()
 
         assert isinstance(result, Result), "all tools must return `Result`"
         message = ToolMessage(
@@ -56,7 +57,12 @@ async def __tools(state: GraphState) -> GraphState:
 
     message = state["messages"][-1]
     if isinstance(message, AIMessage):
-        await asyncio.gather(*[_process(c) for c in message.tool_calls])
+        for c in message.tool_calls:
+            await _process(c)
+
+        # Sometimes tools are required to be called in the specified order (e.g. create file 1,
+        # create file 2, zip the files). Thus we avoid running coroutines concurrently.
+        # await asyncio.gather(*[_process(c) for c in message.tool_calls])
 
     return GraphState(
         messages=outputs,
@@ -204,7 +210,7 @@ async def __vectorstore_summary(state: GraphState, config: RunnableConfig) -> Gr
 
 
 __CHAT_LLM = Groq(model=namespace.model)
-__CHAT_LLM.bind_tools([search])
+__CHAT_LLM.bind_tools([archive, search, write_to_file])
 
 
 async def __chat(state: GraphState, config: RunnableConfig) -> GraphState:

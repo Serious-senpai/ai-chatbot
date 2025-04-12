@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, List, TypedDict
+import zipfile
+from pathlib import Path
+from typing import Annotated, List, Tuple, TypedDict
 
 from pydantic import Field
+from yarl import URL
 from langchain_core.tools import tool
 
 from .results import Result
@@ -59,13 +62,60 @@ async def search(query: str) -> Result[TavilyResponse]:
         return Result(result=await response.json(encoding="utf-8"))
 
 
+__BASE_OUTPUT_DIR = Path(__file__).parent.parent.parent.resolve() / "outputs"
+__BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+__BASE_OUTPUT_URL = URL("/api/outputs")
+
+
+def join_output_path(path: str) -> Tuple[Path, URL]:
+    p = Path(path)
+    p = p.relative_to(p.anchor)  # Remove leading /
+
+    return __BASE_OUTPUT_DIR / p, __BASE_OUTPUT_URL.joinpath(str(p))
+
+
 @tool
-def f(x: float) -> Result[float]:
-    """Special function f"""
-    return Result(result=x ** 2 - 1)
+def write_to_file(path: str, content: str) -> Result[Tuple[str, str]]:
+    """Write UTF-8 text data to a file at the specified path.
+
+    Returns a tuple with 2 values:
+    - The absolute path to the file in the filesystem (LLMs should use this path when calling other tools).
+    - The URL to the file in the API (this path should only be used to display to end-user).
+    """
+    file_path, file_url = join_output_path(path)
+    if not file_path.is_relative_to(__BASE_OUTPUT_DIR):
+        return Result(error="Cannot navigate outside of output directory")
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with file_path.open("w", encoding="utf-8") as file:
+        file.write(content)
+
+    return Result(result=(str(file_path), str(file_url)))
+
+
+@tool
+def archive(path: str, files: List[str]) -> Result[Tuple[str, str]]:
+    """Archive files into a zip file.
+
+    Returns a tuple with 2 values:
+    - The absolute path to the file in the filesystem (LLMs should use this path when calling other tools).
+    - The URL to the file in the API (this path should only be used to display to end-user).
+    """
+    zip_path, zip_url = join_output_path(path)
+    if not zip_path.is_relative_to(__BASE_OUTPUT_DIR):
+        return Result(error="Cannot navigate outside of output directory")
+
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for file in files:
+            actual_path, _ = join_output_path(file)
+            archive.write(actual_path)
+
+    return Result(result=(str(zip_path), str(zip_url)))
 
 
 TOOLS = {
     "search": search,
-    "f": f,
+    "write_to_file": write_to_file,
+    "archive": archive,
 }
