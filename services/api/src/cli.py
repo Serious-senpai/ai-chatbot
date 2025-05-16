@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 
 __all__ = ("namespace", "parse_args")
@@ -11,7 +11,6 @@ class __Namespace(argparse.Namespace):
     if TYPE_CHECKING:
         host: str
         port: int
-        workers: Optional[int]
         log_level: str
         model: str
         embed: str
@@ -25,10 +24,9 @@ __parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 __parser.add_argument("--host", type=str, default="0.0.0.0", help="The host to bind the HTTP server to")
-__parser.add_argument("--port", type=int, default=8000, help="The port to bind the HTTP server to")
-__parser.add_argument("--workers", type=int, required=False, help="The number of worker processes to run")
+__parser.add_argument("--port", type=int, default=80, help="The port to bind the HTTP server to")
 __parser.add_argument("--log-level", type=str, default="debug", help="The log level for the application")
-__parser.add_argument("--model", type=str, default="qwen-2.5-32b", help="The LLM to use in Groq API")
+__parser.add_argument("--model", type=str, default="gemma2-9b-it", help="The LLM to use in Groq API")
 __parser.add_argument("--embed", type=str, default="nomic-embed-text", help="The embedding model to use in Ollama service")
 __parser.add_argument("--ollama", type=str, default="http://ollama:11434", help="The base URL for Ollama service")
 __parser.add_argument("--cors", action="store_true", help="Enable CORS for the HTTP server")

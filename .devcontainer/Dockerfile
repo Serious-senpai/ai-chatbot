@@ -13,9 +13,5 @@ RUN apt-get update && apt-get install -y \
     python3-venv
 
 RUN python3 -m venv /venv
-COPY services/api/requirements.txt /tmp/requirements.txt
+COPY services/api/dev-requirements.txt /tmp/requirements.txt
 RUN /venv/bin/pip install -r /tmp/requirements.txt
-
-RUN python3 -m venv /venv-dev
-COPY services/api/dev-requirements.txt /tmp/dev-requirements.txt
-RUN /venv-dev/bin/pip install -r /tmp/dev-requirements.txt

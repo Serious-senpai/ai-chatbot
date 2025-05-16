@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import traceback
-from typing import Annotated, List, Literal, TypedDict, cast
+from typing import Annotated, List, Literal, TypedDict
 
 from langchain import hub
 from langgraph.graph import StateGraph, START, END
-from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
 
+from .embed import embed_documents
 from .llm import Groq
 from .results import Result
 from .tools import archive, search, write_to_file, TOOLS
@@ -30,7 +30,7 @@ parse_args()
 class GraphState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     temperature: float
-    documents: List[Document]
+    documents: List[List[str]]
     rag_generation: str
 
 
@@ -110,18 +110,15 @@ async def __route_query(state: GraphState) -> Literal["vectorstore", "chat"]:
 
 async def __vectorstore_retriever(state: GraphState, config: RunnableConfig) -> GraphState:
     thread_id = config["configurable"]["thread_id"]
-    chroma = ThreadStateSingleton().chroma.get(thread_id)
+    collection = ThreadStateSingleton().chroma.get_or_create_collection(thread_id)
 
-    if chroma is not None:
-        retriever = chroma.as_retriever()
-        documents = await retriever.ainvoke(cast(str, state["messages"][-1].content))
-    else:
-        documents = []
+    embeddings = await embed_documents([str(state["messages"][-1].content)])
+    results = collection.query(query_embeddings=embeddings, n_results=3)  # type: ignore
 
     return GraphState(
         messages=[],
         temperature=state["temperature"],
-        documents=documents,
+        documents=results["documents"] or [],
         rag_generation=state["rag_generation"],
     )
 

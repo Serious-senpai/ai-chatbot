@@ -78,6 +78,5 @@ if __name__ == "__main__":
         Path(__file__).stem + ":app",
         host=namespace.host,
         port=namespace.port,
-        workers=namespace.workers,
         log_level=namespace.log_level,
     )

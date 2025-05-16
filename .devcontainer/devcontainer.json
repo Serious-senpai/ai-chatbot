@@ -25,9 +25,10 @@
                 "javascript.format.enable": true,
                 "git.autorefresh": true,
                 "mypy-type-checker.preferDaemon": false,
-                "python.defaultInterpreterPath": "/venv-dev/bin/python",
+                "python.defaultInterpreterPath": "/venv/bin/python",
                 "mypy-type-checker.args": [
-                    "--cache-dir=/.mypy_cache"
+                    "--cache-dir=/.mypy_cache",
+                    "--follow-untyped-imports"
                 ],
                 "vue.server.hybridMode": true,
                 "[python]": {
@@ -41,6 +42,11 @@
                 }
             }
         }
+    },
+    "features": {
+        // "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+        //     "moby": false
+        // }
     },
     "dockerComposeFile": "compose.yml",
     "service": "devcontainer",

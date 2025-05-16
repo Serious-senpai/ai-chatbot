@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar, Dict, Optional, TYPE_CHECKING
 
-from langchain_community.vectorstores import Chroma
+import chromadb
 
 
 __all__ = ("ThreadStateSingleton",)
@@ -14,13 +14,13 @@ class ThreadStateSingleton:
     __slots__ = ("chroma", "locks")
     __instance__: ClassVar[Optional[ThreadStateSingleton]] = None
     if TYPE_CHECKING:
-        chroma: Dict[int, Chroma]
+        chroma: chromadb.ClientAPI
         locks: Dict[int, asyncio.Lock]
 
     def __new__(cls) -> ThreadStateSingleton:
         if cls.__instance__ is None:
             self = super().__new__(cls)
-            self.chroma = {}
+            self.chroma = chromadb.Client()
             self.locks = {}
 
             cls.__instance__ = self

@@ -15,10 +15,10 @@ services:
     container_name: devcontainer
     cpus: 4.00
     environment:
-      VITE_APP_BASE_API_URL: http://localhost:8000/api
+      VITE_APP_BASE_API_URL: http://localhost:80/api
     ports:
       - 5173:5173 # frontend (vite)
-      - 8000:8000 # backend (fastapi)
+      - 80:80 # backend (fastapi)
     volumes:
       - ..:/workspaces/ai-chatbot
     working_dir: /workspaces/ai-chatbot

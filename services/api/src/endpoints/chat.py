@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import binascii
+import secrets
 from base64 import b64decode
 from collections import deque
 from typing import Annotated, AsyncIterable, Deque, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException, Response
-from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 from langchain_community.document_loaders.parsers import PyPDFParser
-from langchain_community.vectorstores import Chroma
 from langchain_core.messages import BaseMessageChunk, HumanMessage
 from sse_starlette.sse import EventSourceResponse
 from langchain_core.documents.base import Blob
@@ -19,7 +18,7 @@ from langchain_core.documents.base import Blob
 from ..cli import namespace, parse_args
 from ..config import EMBEDDING_MODEL_READY
 from ..models import Message, Thread
-from ..rag import GraphState, graph
+from ..rag import GraphState, embed_documents, graph
 from ..state import ThreadStateSingleton
 from ..stream import ChunkStreamSingleton
 
@@ -33,22 +32,6 @@ router = APIRouter(
 parse_args()
 THREADS: Dict[int, Thread] = {}
 MESSAGES: Dict[Thread, Deque[Message]] = {}
-
-
-graph_png_view = graph.get_graph().draw_mermaid_png()
-
-
-@router.get(
-    "/graph",
-    include_in_schema=False,
-)
-async def get_graph() -> Response:
-    return Response(
-        content=graph_png_view,
-        headers={
-            "Content-Type": "image/png",
-        },
-    )
 
 
 @router.post(
@@ -131,20 +114,16 @@ async def __yield_messages(
 
             documents = list(await asyncio.to_thread(__PDF_PARSER.lazy_parse, blob))
             documents = list(await __SPLITTER.atransform_documents(documents))
-            try:
-                chroma = state.chroma[thread.id]
-                await chroma.aadd_documents(documents)
 
-            except KeyError:
-                chroma = Chroma.from_documents(
-                    documents=documents,
-                    collection_name=str(thread.id),
-                    embedding=OllamaEmbeddings(
-                        model=namespace.embed,
-                        base_url=namespace.ollama,
-                    ),
-                )
-                state.chroma[thread.id] = chroma
+            chroma = state.chroma
+            collection = chroma.get_or_create_collection(str(thread.id))
+
+            embeddings = await embed_documents([d.page_content for d in documents])
+            collection.add(
+                ids=[secrets.token_hex(16) for _ in documents],
+                documents=[d.page_content for d in documents],
+                embeddings=embeddings,  # type: ignore  # List[List[float]] should match against List[Sequence[float]] though?
+            )
 
         yield __MessageStreamPayload(event="event", data="Generating response...")
         await asyncio.sleep(0)

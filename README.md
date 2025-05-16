@@ -21,7 +21,7 @@ $ source /venv-dev/bin/activate
 $ pip install -r dev-requirements.txt
 ```
 
-2. Run the backend server with CORS enabled (since the backend runs at `localhost:8000` while the frontend is at `localhost:5173`).
+2. Run the backend server with CORS enabled (since the backend runs at `localhost:80` while the frontend is at `localhost:5173`).
 ```bash
 $ pwd
 /workspaces/ai-chatbot/services/api
@@ -32,7 +32,7 @@ To view all options available, run `python main.py -h`.
 
 3. Set the environment variable `VITE_APP_BASE_API_URL` to point to the backend server.
 ```bash
-$ export VITE_APP_BASE_API_URL=http://localhost:8000/api
+$ export VITE_APP_BASE_API_URL=http://localhost:80/api
 ```
 
 4. Run the frontend in development mode.

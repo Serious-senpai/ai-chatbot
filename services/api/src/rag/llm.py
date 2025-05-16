@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Callable, Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Literal, NotRequired, Optional, Sequence, TypedDict, Union
 
 import aiohttp
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -27,22 +27,22 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from ..config import GROQ_API_KEY
 
 
-__all__ = ("Groq",)
+__all__ = ("Groq", "Ollama")
 
 
-class Groq(BaseChatModel):
+class CustomChatModel(BaseChatModel):
 
-    __tools: List[Dict[str, Any]] = []
-    __session: Optional[aiohttp.ClientSession] = None
+    _tools: List[Dict[str, Any]] = []
+    _session: Optional[aiohttp.ClientSession] = None
 
-    model: str
+    base_url: str
 
     @property
     def session(self) -> aiohttp.ClientSession:
-        if self.__session is None:
-            self.__session = aiohttp.ClientSession("https://api.groq.com")
+        if self._session is None:
+            self._session = aiohttp.ClientSession(self.base_url)
 
-        return self.__session
+        return self._session
 
     def bind_tools(
         self,
@@ -53,9 +53,9 @@ class Groq(BaseChatModel):
     ) -> Runnable[LanguageModelInput, BaseMessage]:
         for tool in tools:
             if isinstance(tool, BaseTool):
-                self.__tools.append(convert_to_openai_tool(tool))
+                self._tools.append(convert_to_openai_tool(tool))
             elif isinstance(tool, dict):
-                self.__tools.append(tool)
+                self._tools.append(tool)
             else:
                 raise TypeError(f"Unsupported tool: {tool!r}")
 
@@ -70,10 +70,6 @@ class Groq(BaseChatModel):
     ) -> ChatResult:
         raise NotImplementedError("This implementation does not support synchronous generation")
 
-    @property
-    def _llm_type(self) -> str:
-        return f"Groq[{self.model}]"
-
     async def _agenerate(
         self,
         messages: List[BaseMessage],
@@ -82,6 +78,16 @@ class Groq(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         return await agenerate_from_stream(self._astream(messages, stop, run_manager, **kwargs))
+
+
+class Groq(CustomChatModel):
+
+    base_url: str = "https://api.groq.com"
+    model: str
+
+    @property
+    def _llm_type(self) -> str:
+        return f"Groq[{self.model}]"
 
     async def _astream(
         self,
@@ -101,7 +107,7 @@ class Groq(BaseChatModel):
                 "stop": stop,
                 "stream": True,
                 "temperature": temperature,
-                "tools": self.__tools,
+                "tools": self._tools,
             },
             headers={
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -194,4 +200,102 @@ class Groq(BaseChatModel):
         if "name" in message.additional_kwargs:
             message_dict["name"] = message.additional_kwargs["name"]
 
+        return message_dict
+
+
+class OllamaMessage(TypedDict):
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    tool_calls: NotRequired[Dict[str, Any]]
+
+
+class Ollama(CustomChatModel):
+
+    base_url: str
+    model: str
+
+    @property
+    def _llm_type(self) -> str:
+        return f"Ollama[{self.model}]"
+
+    async def _astream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        temperature: Optional[float] = kwargs.get("temperature")
+
+        async with self.session.post(
+            "/api/chat",
+            json={
+                "messages": [self.__dump_message(message) for message in messages],
+                "model": self.model,
+                "stream": True,
+                "options": {
+                    "temperature": temperature,
+                },
+                "tools": self._tools,
+            },
+        ) as response:
+            response.raise_for_status()
+
+            while data := await response.content.readline():
+                line = data.decode("utf-8").strip()
+                if len(line) == 0:
+                    continue
+
+                chunk = json.loads(line)
+
+                if chunk.get("done", False):
+                    break
+
+                message = chunk["message"]
+                if tool_calls := message.get("tool_calls"):
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content="",
+                            tool_calls=[
+                                ToolCall(
+                                    name=t["function"]["name"],
+                                    args=t["function"]["arguments"],
+                                    id=None,
+                                ) for t in tool_calls
+                            ],
+                        )
+                    )
+
+                else:
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content=message["content"],
+                        ),
+                    )
+
+    @staticmethod
+    def __dump_message(message: BaseMessage) -> OllamaMessage:
+        message_dict: OllamaMessage
+        if isinstance(message, ChatMessage):
+            message_dict = {"role": message.role, "content": str(message.content)}  # type: ignore
+
+        elif isinstance(message, HumanMessage):
+            message_dict = {"role": "user", "content": str(message.content)}
+
+        elif isinstance(message, AIMessage):
+            message_dict = {"role": "assistant", "content": str(message.content)}
+
+        elif isinstance(message, SystemMessage):
+            message_dict = {"role": "system", "content": str(message.content)}
+
+        elif isinstance(message, ToolMessage):
+            message_dict = {
+                "role": "tool",
+                "content": str(message.content),
+            }
+
+        else:
+            raise TypeError(f"Got unknown type {message}")
+
+        print(f"From {message}\nTo {message_dict}")
         return message_dict
